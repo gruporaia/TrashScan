@@ -1,0 +1,15 @@
+
+path: datasets/taco_clean
+
+train: images/train
+val: images/val
+
+nc: 6
+
+names:
+  0: plastic
+  1: metal
+  2: paper
+  3: glass
+  4: organic
+  5: other
