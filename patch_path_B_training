@@ -1,0 +1,70 @@
+python - <<'EOF'
+"
+python train_path_B.py \
+    --detector_weights ~/V-JEPA-2/mrosado/thrashscan/runs/path_A_4cls/yolov8m/weights/best.pt \
+    --crops_dir        ~/V-JEPA-2/mrosado/thrashscan/processed_4cls \
+    --output           ~/V-JEPA-2/mrosado/thrashscan/runs/path_B \
+    --classifiers      resnet50 vit_b16_scratch vit_b16_imagenet \
+    --epochs           50 \
+    --batch            32 \
+    --device           0 \
+    --use_yolo_crops \
+    --det_conf         0.25 \
+    --crop_cache_dir   ~/V-JEPA-2/mrosado/thrashscan/runs/path_B/crop_cache
+"
+path = "/home/ubuntu/V-JEPA-2/mrosado/thrashscan/train_path_B.py"
+with open(path) as f:
+    content = f.read()
+
+old = '''    train_ds = CropDataset(args.crops_dir, "train",
+                            transform=get_transforms("train"))
+    val_ds   = CropDataset(args.crops_dir, "val",
+                            transform=get_transforms("val"))
+    test_ds  = CropDataset(args.crops_dir, "test",
+                            transform=get_transforms("test"))'''
+
+new = '''    if args.use_yolo_crops:
+        print("\\n  Mode: YOLO on-the-fly crop extraction")
+        from ultralytics import YOLO as _YOLO
+        _detector = _YOLO(str(args.detector_weights))
+        _det_dev  = args.device
+
+        train_ds = YOLOCropDataset(
+            args.crops_dir, "train",
+            detector   = _detector,
+            device     = _det_dev,
+            conf       = args.det_conf,
+            transform  = get_transforms("train"),
+            cache_dir  = args.crop_cache_dir,
+        )
+        val_ds = YOLOCropDataset(
+            args.crops_dir, "val",
+            detector   = _detector,
+            device     = _det_dev,
+            conf       = args.det_conf,
+            transform  = get_transforms("val"),
+            cache_dir  = args.crop_cache_dir,
+        )
+        test_ds = YOLOCropDataset(
+            args.crops_dir, "test",
+            detector   = _detector,
+            device     = _det_dev,
+            conf       = args.det_conf,
+            transform  = get_transforms("test"),
+            cache_dir  = args.crop_cache_dir,
+        )
+    else:
+        print("\\n  Mode: loading pre-generated crops from disk")
+        train_ds = CropDataset(args.crops_dir, "train",
+                                transform=get_transforms("train"))
+        val_ds   = CropDataset(args.crops_dir, "val",
+                                transform=get_transforms("val"))
+        test_ds  = CropDataset(args.crops_dir, "test",
+                                transform=get_transforms("test"))'''
+
+assert old in content, "Dataset construction block not found"
+content = content.replace(old, new)
+with open(path, "w") as f:
+    f.write(content)
+print("main() dataset construction patched")
+EOF
