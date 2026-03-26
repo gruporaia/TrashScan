@@ -298,7 +298,7 @@ def evaluate_combined(
         gt_boxes_all, gt_classes_all, iou_thresh=0.5)
 
     result_dict = {
-        "path":       "B_combined",
+        "path":       "B",
         "model_key":  f"B_{clf_name}_combined",
         "classifier": clf_name,
         "mAP50":      round(mAP50,    5),
