@@ -358,7 +358,7 @@
         <mxCell id="9J2kqZooSlQ6qAgjVNaQ-30" parent="9J2kqZooSlQ6qAgjVNaQ-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;fontFamily=Helvetica;fontSize=12;fontColor=light-dark(#000000,#000000);labelBackgroundColor=none;" value="Fine-tuning (YOLO+hook)" vertex="1">
           <mxGeometry height="30" width="146.5" x="775.75" y="525.71" as="geometry" />
         </mxCell>
-        <mxCell id="9J2kqZooSlQ6qAgjVNaQ-31" edge="1" parent="9J2kqZooSlQ6qAgjVNaQ-1" source="9J2kqZooSlQ6qAgjVNaQ-32" style="edgeStyle=none;shape=connector;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeColor=light-dark(#000000,#040404);align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=12;fontColor=default;labelBackgroundColor=default;endArrow=classic;" target="9J2kqZooSlQ6qAgjVNaQ-2">
+        <mxCell id="9J2kqZooSlQ6qAgjVNaQ-31" edge="1" parent="9J2kqZooSlQ6qAgjVNaQ-1" source="9J2kqZooSlQ6qAgjVNaQ-32" style="edgeStyle=none;shape=connector;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeColor=light-dark(#000000,#040404);align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=12;fontColor=default;labelBackgroundColor=default;endArrow=classic;exitX=0.403;exitY=0.009;exitDx=0;exitDy=0;exitPerimeter=0;" target="9J2kqZooSlQ6qAgjVNaQ-2">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="9J2kqZooSlQ6qAgjVNaQ-33" parent="9J2kqZooSlQ6qAgjVNaQ-1" style="html=1;whiteSpace=wrap;fillColor=none;strokeColor=light-dark(#000000,#000000);" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); font-size: 14px;&quot;&gt;&lt;b style=&quot;&quot;&gt;PATH B&lt;br&gt;&lt;/b&gt;Two-Stage Detect + Classify&lt;/font&gt;" vertex="1">
@@ -492,8 +492,10 @@
         <mxCell id="VOVgbQklPphTw_E35kzE-29" parent="VOVgbQklPphTw_E35kzE-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;fontFamily=Helvetica;fontSize=12;fontColor=light-dark(#000000,#000000);labelBackgroundColor=none;" value="Fine-tuning (YOLO+hook)" vertex="1">
           <mxGeometry height="30" width="146.5" x="775.75" y="525.71" as="geometry" />
         </mxCell>
-        <mxCell id="VOVgbQklPphTw_E35kzE-30" edge="1" parent="VOVgbQklPphTw_E35kzE-1" source="VOVgbQklPphTw_E35kzE-2" style="edgeStyle=none;shape=connector;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeColor=light-dark(#000000,#040404);align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=12;fontColor=default;labelBackgroundColor=default;endArrow=classic;" target="VOVgbQklPphTw_E35kzE-3">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="VOVgbQklPphTw_E35kzE-30" edge="1" parent="VOVgbQklPphTw_E35kzE-1" style="edgeStyle=none;shape=connector;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeColor=light-dark(#000000,#040404);align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=12;fontColor=default;labelBackgroundColor=default;endArrow=classic;" target="VOVgbQklPphTw_E35kzE-3">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="945" y="381" as="sourcePoint" />
+          </mxGeometry>
         </mxCell>
         <mxCell id="VOVgbQklPphTw_E35kzE-31" parent="VOVgbQklPphTw_E35kzE-1" style="html=1;whiteSpace=wrap;fillColor=none;strokeColor=light-dark(#000000,#000000);" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); font-size: 14px;&quot;&gt;&lt;b style=&quot;&quot;&gt;PATH B&lt;br&gt;&lt;/b&gt;Two-Stage Detect + Classify&lt;/font&gt;" vertex="1">
           <mxGeometry height="39" width="354" x="573" y="314" as="geometry" />
