@@ -1,0 +1,38 @@
+name: litter_AB
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+    # ── Core DL ───────────────────────────────────────────────────────────
+    - torch==2.3.1
+    - torchvision==0.18.1
+    - torchaudio==2.3.1
+    # ── Detection ─────────────────────────────────────────────────────────
+    - ultralytics==8.3.2          # YOLO v8/v9/v10/v11 + RT-DETR
+    # ── Classifiers ───────────────────────────────────────────────────────
+    - timm==1.0.3                  # ViT-B/16, ResNet-50 pretrained
+    # ── Data + augmentation ───────────────────────────────────────────────
+    - albumentations==1.4.10
+    - pycocotools==2.0.7
+    - opencv-python-headless==4.10.0.84
+    - pillow==10.4.0
+    # ── Scientific ────────────────────────────────────────────────────────
+    - numpy==1.26.4               # ultralytics requires <2.0
+    - scipy==1.13.1
+    - scikit-learn==1.5.1
+    - pandas==2.2.2
+    - matplotlib==3.9.1
+    # ── Experiment tracking ───────────────────────────────────────────────
+    - mlflow==2.14.1
+    # ── Utilities ─────────────────────────────────────────────────────────
+    - tqdm==4.66.4
+    - pyyaml==6.0.1
+    - einops==0.8.0
+    - ensemble-boxes==1.0.9        # WBF for evaluate.py ensemble mode
+    - gdown==5.2.0                 # MJU-Waste download
+    - roboflow==1.1.48             # OLM / Drinking Waste download
