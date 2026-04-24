@@ -64,7 +64,7 @@ except ImportError:
 # CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-COARSE_CLASSES  = ["plastic", "paper", "metal", "glass", "organic", "hazardous", "other"]
+COARSE_CLASSES  = ["plastic", "paper", "metal", "other"]
 IOU_THRESHOLDS  = np.linspace(0.5, 0.95, 10)
 TACO_BASELINE   = 0.633   # YOLOv5s single-class 2022 paper
 
