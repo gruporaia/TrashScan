@@ -65,7 +65,7 @@ except ImportError:
 # CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-COARSE_CLASSES = ["plastic", "paper", "metal", "other"]
+COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "other"]  # CHANGED: added "glass"
 IOU_THRESHOLDS  = np.linspace(0.5, 0.95, 10)
 TACO_BASELINE   = 0.633   # YOLOv5s single-class 2022 paper
 
@@ -79,15 +79,12 @@ INDIVIDUAL_COLS = [
     "mosaic", "mixup", "train_images", "val_images", "test_images",
     # detection metrics
     "mAP50", "mAP50_95", "precision", "recall", "f1",
-    # per-class AP
-    "AP50_plastic", "AP50_paper", "AP50_metal", "AP50_glass",
-    "AP50_organic", "AP50_hazardous", "AP50_other",
-    # per-class AR
-    "AR50_plastic", "AR50_paper", "AR50_metal", "AR50_glass",
-    "AR50_organic", "AR50_hazardous", "AR50_other",
-    # per-class gt counts
-    "n_gt_plastic", "n_gt_paper", "n_gt_metal", "n_gt_glass",
-    "n_gt_organic", "n_gt_hazardous", "n_gt_other",
+    # per-class AP — CHANGED: removed organic/hazardous, kept glass
+    "AP50_plastic", "AP50_paper", "AP50_metal", "AP50_glass", "AP50_other",
+    # per-class AR — CHANGED: removed organic/hazardous, kept glass
+    "AR50_plastic", "AR50_paper", "AR50_metal", "AR50_glass", "AR50_other",
+    # per-class gt counts — CHANGED: removed organic/hazardous, kept glass
+    "n_gt_plastic", "n_gt_paper", "n_gt_metal", "n_gt_glass", "n_gt_other",
     # efficiency
     "latency_ms", "fps", "model_params_M", "model_size_MB",
     "gpu_memory_MB",
@@ -97,14 +94,15 @@ GLOBAL_COLS = [
     "rank", "path", "model_key", "run_id", "imgsz",
     "epochs_trained", "stopped_early",
     "mAP50", "mAP50_95", "precision", "recall", "f1",
-    "AP50_plastic", "AP50_paper", "AP50_metal", "AP50_glass",
-    "AP50_organic", "AP50_hazardous", "AP50_other",
+    # per-class AP — CHANGED: removed organic/hazardous, kept glass
+    "AP50_plastic", "AP50_paper", "AP50_metal", "AP50_glass", "AP50_other",
     "latency_ms", "fps", "model_params_M", "model_size_MB",
     "train_images", "batch_size", "optimizer", "lr0", "seed",
     # detection vs classification separation
     "det_mAP50", "det_mAP50_95",
     "cls_accuracy", "cls_total_boxes", "det_cls_gap",
-    "cls_acc_plastic", "cls_acc_paper", "cls_acc_metal", "cls_acc_other",
+    # CHANGED: added cls_acc_glass, removed phantom classes
+    "cls_acc_plastic", "cls_acc_paper", "cls_acc_metal", "cls_acc_glass", "cls_acc_other",
 ]
 
 
