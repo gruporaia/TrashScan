@@ -59,7 +59,7 @@ SUPERCATEGORY_TO_COARSE = {
     "Blister pack":          "plastic",
     "Bottle":                "plastic",
     "Bottle cap":            "metal",
-    "Broken glass":          "other",
+    "Broken glass":          "glass",   
     "Can":                   "metal",
     "Carton":                "paper",
     "Cigarette":             "other",
@@ -69,14 +69,14 @@ SUPERCATEGORY_TO_COARSE = {
     "Food Can":              "metal",
     "Food waste":            "other",
     "Garbage bag":           "plastic",
-    "Glass jar":             "other",
+    "Glass jar":             "glass",  
     "Lid":                   "plastic",
     "Magazine paper":        "paper",
     "Meal carton":           "paper",
     "Metal bottle cap":      "metal",
     "Metal lid":             "metal",
     "Other carton":          "paper",
-    "Other glass":           "other",
+    "Other glass":           "glass",   
     "Other metal":           "metal",
     "Other plastic":         "plastic",
     "Other plastic bag":     "plastic",
@@ -106,7 +106,7 @@ SUPERCATEGORY_TO_COARSE = {
     "Wrapping paper":        "paper",
 }
 
-COARSE_CLASSES = ["plastic", "paper", "metal", "other"]
+COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "other"]
 BINARY_CLASSES  = ["litter"]
 
 
