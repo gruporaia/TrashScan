@@ -62,7 +62,7 @@ MODEL_REGISTRY = {
     "rtdetr-x":  "rtdetr-x.pt",
 }
 
-COARSE_CLASSES = ["plastic", "paper", "metal", "other"]
+COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "other"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
