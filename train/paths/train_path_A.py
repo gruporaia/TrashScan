@@ -62,7 +62,7 @@ MODEL_REGISTRY = {
     "rtdetr-x":  "rtdetr-x.pt",
 }
 
-COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "organic", "hazardous", "other"]
+COARSE_CLASSES = ["plastic", "paper", "metal", "other"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
@@ -167,10 +167,10 @@ def train_single(
 
         # ── other ─────────────────────────────────────────────────────────
         rect            = False,
-        cache           = "disk",
+        cache           = True,
         workers         = 8,
         patience        = patience,
-        save_period     = 10,
+        save_period     = -1,
         val             = True,
         plots           = True,
         verbose         = True,
