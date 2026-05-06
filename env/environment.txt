@@ -1,0 +1,34 @@
+# Core DL
+torch==2.3.1
+torchvision==0.18.1
+torchaudio==2.3.1
+
+# Detection
+ultralytics==8.3.2
+
+# Classifiers
+timm==1.0.3
+
+# Data + augmentation
+albumentations==1.4.10
+pycocotools==2.0.7
+opencv-python-headless==4.10.0.84
+pillow==10.4.0
+
+# Scientific
+numpy==1.26.4
+scipy==1.13.1
+scikit-learn==1.5.1
+pandas==2.2.2
+matplotlib==3.9.1
+
+# Experiment tracking
+mlflow==2.14.1
+
+# Utilities
+tqdm==4.66.4
+pyyaml==6.0.1
+einops==0.8.0
+ensemble-boxes==1.0.9
+gdown==5.2.0
+roboflow==1.1.48
