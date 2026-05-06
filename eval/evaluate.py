@@ -38,6 +38,7 @@ import json
 import time
 from pathlib import Path
 
+import cv2
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -64,7 +65,7 @@ except ImportError:
 # CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-COARSE_CLASSES  = ["plastic", "paper", "metal", "glass", "organic", "hazardous", "other"]
+COARSE_CLASSES = ["plastic", "paper", "metal", "other"]
 IOU_THRESHOLDS  = np.linspace(0.5, 0.95, 10)
 TACO_BASELINE   = 0.633   # YOLOv5s single-class 2022 paper
 
@@ -204,7 +205,123 @@ def compute_ap_ar(
 # COLLECT YOLO PREDICTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def collect_predictions(model, test_dir, device, imgsz=640):
+def _predict_array(model, img_bgr: np.ndarray, device, imgsz=640):
+    """
+    Runs YOLO on an already loaded BGR image array.
+    Returns normalized boxes [x1,y1,x2,y2] in [0,1], scores, classes.
+    """
+    r = model.predict(
+        source=img_bgr,
+        conf=0.001,
+        iou=0.6,
+        imgsz=imgsz,
+        device=device,
+        verbose=False,
+    )[0]
+
+    if r.boxes is not None and len(r.boxes):
+        pb = r.boxes.xyxyn.cpu().numpy().astype(np.float32)
+        ps = r.boxes.conf.cpu().numpy().astype(np.float32)
+        pc = r.boxes.cls.cpu().numpy().astype(int)
+    else:
+        pb = np.zeros((0, 4), dtype=np.float32)
+        ps = np.zeros((0,), dtype=np.float32)
+        pc = np.zeros((0,), dtype=int)
+
+    return pb, ps, pc
+
+
+def _undo_hflip_boxes_norm(boxes_norm: np.ndarray) -> np.ndarray:
+    """
+    Undo horizontal flip for normalized xyxy boxes in [0,1].
+    """
+    if len(boxes_norm) == 0:
+        return boxes_norm
+    out = boxes_norm.copy()
+    out[:, 0] = 1.0 - boxes_norm[:, 2]
+    out[:, 2] = 1.0 - boxes_norm[:, 0]
+    return out
+
+
+def predict_tta_wbf(
+    model,
+    img_path: Path,
+    device,
+    scales=(512, 640, 768),
+    use_hflip=False,
+    wbf_iou=0.55,
+    skip_box_thr=0.001,
+):
+    """
+    Multi-scale TTA (+ optional horizontal flip) for a single image,
+    fused with Weighted Boxes Fusion.
+    """
+    if not ENSEMBLE_AVAILABLE:
+        raise RuntimeError(
+            "TTA+WBF requested but ensemble_boxes is not installed. "
+            "Install with: pip install ensemble-boxes"
+        )
+
+    img = cv2.imread(str(img_path))
+    if img is None:
+        return (
+            np.zeros((0, 4), dtype=np.float32),
+            np.zeros((0,), dtype=np.float32),
+            np.zeros((0,), dtype=int),
+        )
+
+    boxes_list = []
+    scores_list = []
+    labels_list = []
+
+    for scale in scales:
+        pb, ps, pc = _predict_array(model, img, device=device, imgsz=scale)
+        boxes_list.append(pb.tolist())
+        scores_list.append(ps.tolist())
+        labels_list.append(pc.tolist())
+
+        if use_hflip:
+            img_flip = cv2.flip(img, 1)
+            pb_f, ps_f, pc_f = _predict_array(model, img_flip, device=device, imgsz=scale)
+            pb_f = _undo_hflip_boxes_norm(pb_f)
+            boxes_list.append(pb_f.tolist())
+            scores_list.append(ps_f.tolist())
+            labels_list.append(pc_f.tolist())
+
+    fused_boxes, fused_scores, fused_labels = weighted_boxes_fusion(
+        boxes_list,
+        scores_list,
+        labels_list,
+        weights=[1.0] * len(boxes_list),
+        iou_thr=wbf_iou,
+        skip_box_thr=skip_box_thr,
+    )
+
+    if len(fused_boxes) == 0:
+        return (
+            np.zeros((0, 4), dtype=np.float32),
+            np.zeros((0,), dtype=np.float32),
+            np.zeros((0,), dtype=int),
+        )
+
+    return (
+        np.array(fused_boxes, dtype=np.float32),
+        np.array(fused_scores, dtype=np.float32),
+        np.array(fused_labels, dtype=int),
+    )
+
+
+def collect_predictions(
+    model,
+    test_dir,
+    device,
+    imgsz=640,
+    use_tta_wbf=False,
+    tta_scales=(512, 640, 768),
+    tta_flip=False,
+    tta_wbf_iou=0.55,
+    tta_skip_box_thr=0.001,
+):
     img_dir   = test_dir / "images"
     lbl_dir   = test_dir / "labels"
     img_paths = sorted(img_dir.glob("*.jpg"))
@@ -216,32 +333,52 @@ def collect_predictions(model, test_dir, device, imgsz=640):
         lbl_path = lbl_dir / img_path.with_suffix(".txt").name
         gb, gc   = [], []
         if lbl_path.exists():
-            for line in lbl_path.read_text().strip().splitlines():
-                parts = line.split()
-                if len(parts) < 5:
-                    continue
-                cls_id       = int(parts[0])
-                cx,cy,nw,nh  = map(float, parts[1:5])
-                x1 = (cx - nw/2) * imgsz
-                y1 = (cy - nh/2) * imgsz
-                x2 = (cx + nw/2) * imgsz
-                y2 = (cy + nh/2) * imgsz
-                gb.append([x1, y1, x2, y2])
-                gc.append(cls_id)
+            txt = lbl_path.read_text().strip()
+            if txt:
+                for line in txt.splitlines():
+                    parts = line.split()
+                    if len(parts) < 5:
+                        continue
+                    cls_id      = int(parts[0])
+                    cx, cy, nw, nh = map(float, parts[1:5])
+                    x1 = (cx - nw / 2) * imgsz
+                    y1 = (cy - nh / 2) * imgsz
+                    x2 = (cx + nw / 2) * imgsz
+                    y2 = (cy + nh / 2) * imgsz
+                    gb.append([x1, y1, x2, y2])
+                    gc.append(cls_id)
 
-        gt_boxes.append(  np.array(gb, dtype=np.float32) if gb else np.zeros((0,4)))
+        gt_boxes.append(np.array(gb, dtype=np.float32) if gb else np.zeros((0, 4), dtype=np.float32))
         gt_classes.append(np.array(gc, dtype=int))
 
-        r  = model.predict(str(img_path), conf=0.001, iou=0.6,
-                           imgsz=imgsz, device=device, verbose=False)[0]
-        if r.boxes is not None and len(r.boxes):
-            pb = r.boxes.xyxy.cpu().numpy()
-            ps = r.boxes.conf.cpu().numpy()
-            pc = r.boxes.cls.cpu().numpy().astype(int)
+        if use_tta_wbf:
+            pb_norm, ps, pc = predict_tta_wbf(
+                model=model,
+                img_path=img_path,
+                device=device,
+                scales=tta_scales,
+                use_hflip=tta_flip,
+                wbf_iou=tta_wbf_iou,
+                skip_box_thr=tta_skip_box_thr,
+            )
+            pb = (pb_norm * imgsz).astype(np.float32) if len(pb_norm) else np.zeros((0, 4), dtype=np.float32)
         else:
-            pb = np.zeros((0,4))
-            ps = np.zeros(0)
-            pc = np.zeros(0, dtype=int)
+            r = model.predict(
+                str(img_path),
+                conf=0.001,
+                iou=0.6,
+                imgsz=imgsz,
+                device=device,
+                verbose=False,
+            )[0]
+            if r.boxes is not None and len(r.boxes):
+                pb = r.boxes.xyxy.cpu().numpy().astype(np.float32)
+                ps = r.boxes.conf.cpu().numpy().astype(np.float32)
+                pc = r.boxes.cls.cpu().numpy().astype(int)
+            else:
+                pb = np.zeros((0, 4), dtype=np.float32)
+                ps = np.zeros((0,), dtype=np.float32)
+                pc = np.zeros((0,), dtype=int)
 
         pred_boxes.append(pb)
         pred_scores.append(ps)
@@ -594,6 +731,11 @@ def compute_classification_accuracy(
 def evaluate_model(
     path_tag, model_key, weights, data_yaml,
     output_dir, run_dir, device="0", imgsz=640,
+    use_tta_wbf=False,
+    tta_scales=(512, 640, 768),
+    tta_flip=False,
+    tta_wbf_iou=0.55,
+    tta_skip_box_thr=0.001,
 ):
     print(f"\n{'─'*60}")
     print(f"  Path      : {path_tag}")
@@ -617,9 +759,22 @@ def evaluate_model(
     model = YOLO(str(weights))
 
     # collect predictions on test split
-    torch.cuda.reset_peak_memory_stats()
-    pred_boxes, pred_scores, pred_classes, gt_boxes, gt_classes = \
-        collect_predictions(model, test_dir, device, imgsz)
+    if torch.cuda.is_available():
+      try:
+          torch.cuda.reset_peak_memory_stats()
+      except Exception:
+          pass
+    pred_boxes, pred_scores, pred_classes, gt_boxes, gt_classes = collect_predictions(
+        model=model,
+        test_dir=test_dir,
+        device=device,
+        imgsz=imgsz,
+        use_tta_wbf=use_tta_wbf,
+        tta_scales=tuple(tta_scales),
+        tta_flip=tta_flip,
+        tta_wbf_iou=tta_wbf_iou,
+        tta_skip_box_thr=tta_skip_box_thr,
+    )
     gpu_mem = get_gpu_memory()
 
     # mAP across IoU thresholds
@@ -714,6 +869,10 @@ def evaluate_model(
         "model_params_M":params_m,
         "model_size_MB": size_mb,
         "gpu_memory_MB": gpu_mem,
+        "inference_mode": "tta_wbf" if use_tta_wbf else "standard",
+        "tta_scales": list(tta_scales) if use_tta_wbf else None,
+        "tta_flip": bool(tta_flip) if use_tta_wbf else None,
+        "tta_wbf_iou": float(tta_wbf_iou) if use_tta_wbf else None,
         # detection-only (collapsed single class)
         "det_mAP50":     det_only.get("det_mAP50",    None),
         "det_mAP50_95":  det_only.get("det_mAP50_95", None),
@@ -1068,6 +1227,16 @@ def parse_args():
     p.add_argument("--device",    type=str,  default="0")
     p.add_argument("--imgsz",     type=int,  default=640)
     p.add_argument("--summarize",   action="store_true")
+    p.add_argument("--use_tta_wbf", action="store_true",
+                   help="Enable multi-scale TTA + WBF during inference")
+    p.add_argument("--tta_scales", nargs="+", type=int, default=[512, 640, 768],
+                   help="Scales used for TTA, e.g. --tta_scales 512 640 768")
+    p.add_argument("--tta_flip", action="store_true",
+                   help="Also run horizontal flip in TTA")
+    p.add_argument("--tta_wbf_iou", type=float, default=0.55,
+                   help="WBF IoU threshold for TTA fusion")
+    p.add_argument("--tta_skip_box_thr", type=float, default=0.001,
+                   help="WBF skip_box_thr for TTA fusion")
     p.add_argument("--ensemble",    action="store_true",
                    help="Run WBF ensemble across all models in --runs_dir")
     p.add_argument("--ensemble_iou", type=float, default=0.55,
@@ -1117,6 +1286,11 @@ if __name__ == "__main__":
             run_dir   = run_dir,
             device    = args.device,
             imgsz     = args.imgsz,
+            use_tta_wbf = args.use_tta_wbf,
+            tta_scales = args.tta_scales,
+            tta_flip = args.tta_flip,
+            tta_wbf_iou = args.tta_wbf_iou,
+            tta_skip_box_thr = args.tta_skip_box_thr,
         )
 
     # ── ensemble mode ────────────────────────────────────────────────────
@@ -1159,6 +1333,11 @@ if __name__ == "__main__":
                 run_dir   = run_dir,
                 device    = args.device,
                 imgsz     = args.imgsz,
+                use_tta_wbf = args.use_tta_wbf,
+                tta_scales = args.tta_scales,
+                tta_flip = args.tta_flip,
+                tta_wbf_iou = args.tta_wbf_iou,
+                tta_skip_box_thr = args.tta_skip_box_thr,
             )
     else:
         print("Provide either (--model_key + --weights) or --runs_dir")
