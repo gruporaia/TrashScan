@@ -75,6 +75,8 @@ CLASSIFIER_REGISTRY = {
     "vit_b16_scratch":  ("vit_base_patch16_224",                      False),
     # B3: ViT-B/16 ImageNet21k pretrained — large-scale pretraining value
     "vit_b16_imagenet": ("vit_base_patch16_224.augreg_in21k_ft_in1k", True),
+    # B4: ViT-L/16 ImageNet21k pretrained — larger model with large-scale pretraining
+    "vit_l16_imagenet":  ("vit_large_patch16_224.augreg_in21k_ft_in1k", True),
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
