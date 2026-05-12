@@ -1,4 +1,3 @@
-
 """
 merge_datasets.py  —  Merges TACO + external datasets into single
 COCO JSON + image folder, then runs preprocess.py for all 3 paths.
@@ -7,7 +6,7 @@ Usage:
   python merge_datasets.py \
       --taco_root      ~/V-JEPA-2/mrosado/thrashscan/TACO \
       --external_root  ~/V-JEPA-2/mrosado/thrashscan/external_datasets \
-      --output_root    ~/V-JEPA-2/mrosado/thrashscan/processed_4cls
+      --output_root    ~/V-JEPA-2/mrosado/thrashscan/processed_5cls
 """
 
 import argparse
@@ -19,16 +18,16 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-COARSE_CLASSES = ["plastic", "paper", "metal", "other"]
+COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "other"]  # CHANGED: added "glass"
 
 
 def remap_cat(cid: int, cats: dict) -> int:
-    """category remapping from source cat_id to 4-class index."""
+    """category remapping from source cat_id to 5-class index."""
     name = cats.get(cid, "other").lower()
     for cls in COARSE_CLASSES:
         if cls in name:
             return COARSE_CLASSES.index(cls)
-    return 3
+    return COARSE_CLASSES.index("other")  # CHANGED: was hardcoded 3, now dynamic (if something goes wrong, this might be it)
 
 
 def merge_coco_jsons(
@@ -40,7 +39,7 @@ def merge_coco_jsons(
     output_img_dir.mkdir(parents=True, exist_ok=True)
 
     merged = {
-        "info":        {"description": "TACO+OLM+DrinkingWaste+MJUWaste 4-class"},
+        "info":        {"description": "TACO+OLM+DrinkingWaste+MJUWaste 5-class"},  # CHANGED: 4-class -> 5-class
         "images":      [],
         "annotations": [],
         "categories":  [{"id": i, "name": n, "supercategory": n}
@@ -226,7 +225,7 @@ if __name__ == "__main__":
             print(f"\nRetrain with:")
             print(f"  python train_path_A.py \\")
             print(f"      --data     {args.output_root}/dataset_path_A.yaml \\")
-            print(f"      --output   ~/runs/path_A_4cls \\")
+            print(f"      --output   ~/runs/path_A_5cls \\")  # CHANGED: 4cls -> 5cls
             print(f"      --models   yolov8m yolov9s \\")
             print(f"      --epochs   300 --batch 8 --patience 30 --device 0")
     else:

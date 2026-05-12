@@ -1,4 +1,3 @@
-
 """
 download_external_datasets.py
 
@@ -26,7 +25,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-COARSE_CLASSES = ["plastic", "paper", "metal", "other"]
+COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "other"]  # CHANGED: added "glass"
 
 EXTERNAL_LABEL_TO_COARSE = {
     "plastic": "plastic", "plastic_bag": "plastic",
@@ -39,7 +38,8 @@ EXTERNAL_LABEL_TO_COARSE = {
     "bottle_cap": "metal", "pop_tab": "metal",
     "paper": "paper", "cardboard": "paper", "carton": "paper",
     "newspaper": "paper", "tissue": "paper",
-    "glass": "other", "organic": "other", "battery": "other",
+    "glass": "glass",  # CHANGED: was "other", now correctly mapped to "glass"
+    "organic": "other", "battery": "other",
     "hazardous": "other", "rope": "other", "shoe": "other",
     "trash": "other", "litter": "other", "garbage": "other",
     "unknown": "other", "waste": "other", "cigarette": "other",
@@ -254,7 +254,7 @@ def process_mju_waste(mju_dir, output_root):
 
 
 def _coco_remap_to_other(src_json, images_src_dir, output_dir, name):
-    """Remap all categories to 'other' (index 3) for single-class datasets."""
+    """Remap all categories to 'other' for single-class datasets."""
     with open(src_json) as f:
         data = json.load(f)
     coco = {
@@ -266,7 +266,7 @@ def _coco_remap_to_other(src_json, images_src_dir, output_dir, name):
     }
     for ann in data.get("annotations", []):
         new = ann.copy()
-        new["category_id"] = 3
+        new["category_id"] = COARSE_CLASSES.index("other")  # CHANGED: was hardcoded 3
         coco["annotations"].append(new)
     out_json = output_dir / f"{name}_annotations.json"
     with open(out_json, "w") as f:
@@ -340,7 +340,7 @@ def _voc_to_coco_mju(voc_root, output_dir):
                 continue
             coco["annotations"].append({
                 "id": ann_id, "image_id": img_id,
-                "category_id": 3,
+                "category_id": COARSE_CLASSES.index("other"),  # CHANGED: was hardcoded 3
                 "bbox": [round(xmin,2),round(ymin,2),round(bw,2),round(bh,2)],
                 "area": round(bw*bh,2), "iscrowd": 0, "segmentation": [],
             })
@@ -375,9 +375,9 @@ def print_download_summary(output_root):
                     data = json.load(f)
                 n += len(data.get("images", []))
                 for ann in data.get("annotations", []):
-                    cid = ann.get("category_id", 3)
+                    cid = ann.get("category_id", COARSE_CLASSES.index("other"))
                     cls_counts[COARSE_CLASSES[cid]
-                               if cid < 4 else "unknown"] += 1
+                               if cid < len(COARSE_CLASSES) else "unknown"] += 1  # CHANGED: was hardcoded < 4
             except Exception:
                 pass
         print(f"  {ds_dir.name:<25} {n} images  "
@@ -389,7 +389,7 @@ def print_download_summary(output_root):
     print(f"  python merge_datasets.py \\")
     print(f"      --taco_root     ~/V-JEPA-2/mrosado/thrashscan/TACO \\")
     print(f"      --external_root {output_root} \\")
-    print(f"      --output_root   ~/V-JEPA-2/mrosado/thrashscan/processed_4cls")
+    print(f"      --output_root   ~/V-JEPA-2/mrosado/thrashscan/processed_5cls")  # CHANGED: 4cls -> 5cls
 
 
 def parse_args():
