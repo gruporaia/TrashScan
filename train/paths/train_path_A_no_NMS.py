@@ -33,6 +33,7 @@ from scipy.optimize import linear_sum_assignment
 from ultralytics import YOLO
 from ultralytics.models.yolo.detect import DetectionTrainer
 from ultralytics.utils.loss import v8DetectionLoss
+import torch.nn as nn
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MODEL REGISTRY
