@@ -203,6 +203,7 @@ def train_single(
     device:       str,
     class_weights:list,
     patience:     int  = 30,
+    resume:       str  = None, 
 ) -> dict:
     model_str = MODEL_REGISTRY[model_key]
     print(f"\n{'─'*60}")
@@ -211,7 +212,11 @@ def train_single(
     print(f"  Epochs : {epochs}   Batch : {batch}   imgsz : {imgsz}")
     print(f"{'─'*60}")
 
-    model = YOLO(model_str)
+    if resume:
+        print(f"  Resuming from: {resume}")
+        model = YOLO(resume)
+    else:
+        model = YOLO(model_str)
 
     extra_kwargs = {}
     if model_key == "yolov11m_o2o":
@@ -269,6 +274,7 @@ def train_single(
         val             = True,
         plots           = True,
         verbose         = True,
+        resume = bool(resume),
         **extra_kwargs,
     )
 
@@ -357,6 +363,8 @@ def parse_args():
                    help="Early stopping: epochs without improvement before stopping")
     p.add_argument("--mlflow_uri", type=str,  default="./mlruns")
     p.add_argument("--summarize",  action="store_true")
+    p.add_argument("--resume", type=str, default=None,
+               help="Caminho para last.pt para retomar treino")
     return p.parse_args()
 
 
@@ -401,6 +409,7 @@ if __name__ == "__main__":
             device        = args.device,
             class_weights = class_weights,
             patience      = args.patience,
+            resume = args.resume
         )
 
         metrics_path = args.output / model_key / "metrics.json"
