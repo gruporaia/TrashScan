@@ -33,7 +33,7 @@ from PIL import Image
 from tqdm import tqdm
 from ultralytics import YOLO
 
-COARSE_CLASSES = ["plastic", "paper", "metal", "other"]
+COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "other"]
 NUM_CLASSES    = len(COARSE_CLASSES)
 IOU_THRESHOLDS = np.linspace(0.5, 0.95, 10)
 
@@ -41,6 +41,7 @@ CLASSIFIER_REGISTRY = {
     "resnet50":         "resnet50.a1_in1k",
     "vit_b16_scratch":  "vit_base_patch16_224",
     "vit_b16_imagenet": "vit_base_patch16_224.augreg_in21k_ft_in1k",
+    "vit_l16_imagenet": "vit_large_patch16_224.augreg_in21k_ft_in1k",
 }
 
 CROP_TRANSFORM = T.Compose([
