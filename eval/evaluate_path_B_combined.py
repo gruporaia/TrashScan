@@ -34,6 +34,7 @@ from tqdm import tqdm
 from ultralytics import YOLO
 
 COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "other"]
+COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "other"]
 NUM_CLASSES    = len(COARSE_CLASSES)
 IOU_THRESHOLDS = np.linspace(0.5, 0.95, 10)
 
