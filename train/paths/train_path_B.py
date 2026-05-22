@@ -15,8 +15,8 @@ Two crop-sourcing modes:
 Usage — YOLO-crop mode (recommended, matches evaluation protocol):
   conda activate litter_AB
   python train_path_B.py \
-      --detector_weights ~/runs/path_A_4cls/yolov8m/weights/best.pt \
-      --crops_dir        ~/processed_4cls \
+      --detector_weights ~/runs/path_A_5cls/yolov11m_o2o/weights/best.pt \
+      --crops_dir        ~/processed_5cls \
       --output           ~/runs/path_B \
       --classifiers      resnet50 vit_b16_scratch vit_b16_imagenet \
       --epochs           50 \
@@ -28,8 +28,8 @@ Usage — YOLO-crop mode (recommended, matches evaluation protocol):
 
 Usage — GT-crop mode (fast baseline):
   python train_path_B.py \
-      --detector_weights ~/runs/path_A_4cls/yolov8m/weights/best.pt \
-      --crops_dir        ~/processed_4cls \
+      --detector_weights ~/runs/path_A_5cls/yolov11m_o2o/weights/best.pt \
+      --crops_dir        ~/processed_5cls \
       --output           ~/runs/path_B \
       --classifiers      resnet50 vit_b16_scratch vit_b16_imagenet \
       --epochs           50 --batch 32 --device 0
@@ -64,7 +64,7 @@ from sklearn.metrics import ConfusionMatrixDisplay
 # CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-COARSE_CLASSES = ["plastic", "paper", "metal", "other"]
+COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "other"]
 NUM_CLASSES    = len(COARSE_CLASSES)
 CROP_SIZE      = 224
 
@@ -94,7 +94,7 @@ class YOLOCropDataset(Dataset):
     On subsequent epochs the cached crops are loaded directly (fast path).
 
     Args:
-        data_root:  processed_4cls root (contains train/val/test/path_B)
+        data_root:  processed dataset root (contains train/val/test/path_B)
         split:      "train" | "val" | "test"
         detector:   Ultralytics YOLO model (frozen, for inference only)
         device:     inference device string, e.g. "0" or "cpu"
@@ -112,10 +112,12 @@ class YOLOCropDataset(Dataset):
         conf:      float = 0.25,
         transform=None,
         cache_dir: Path = None,
+        tta:      bool = False,
     ):
         self.transform = transform
         self.samples   = []          # [(crop_tensor_or_path, label)]
         self._use_cache = cache_dir is not None
+        self.tta = tta
 
         img_dir = Path(data_root) / split / "path_B" / "images"
         lbl_dir = Path(data_root) / split / "path_B" / "labels"
@@ -173,8 +175,12 @@ class YOLOCropDataset(Dataset):
 
             # run YOLO detector
             result = detector.predict(
-                str(img_path), conf=conf, iou=0.6,
-                device=device, verbose=False
+                str(img_path),
+                conf=conf,
+                iou=0.6,
+                device=device,
+                augment=self.tta,
+                verbose=False,
             )[0]
 
             if result.boxes is None or len(result.boxes) == 0:
@@ -547,7 +553,7 @@ def parse_args():
     p.add_argument("--detector_weights", type=Path, required=True,
                    help="best.pt from best Path A model (frozen detector)")
     p.add_argument("--crops_dir",        type=Path, required=True,
-                   help="processed_4cls root dir")
+                   help="processed dataset root dir")
     p.add_argument("--output",           type=Path,
                    default=Path("runs/path_B"))
     p.add_argument("--classifiers",      nargs="+",
@@ -565,6 +571,8 @@ def parse_args():
                    help="Extract crops from YOLO detector instead of GT crops")
     p.add_argument("--det_conf",         type=float, default=0.25,
                    help="YOLO detection confidence threshold for crop extraction")
+    p.add_argument("--tta",              action="store_true",
+               help="Use YOLO test-time augmentation during crop extraction")
     p.add_argument("--crop_cache_dir",   type=Path,  default=None,
                    help="Cache directory for YOLO-extracted crops")
     return p.parse_args()
@@ -591,6 +599,7 @@ if __name__ == "__main__":
     # ── build datasets ────────────────────────────────────────────────────
     if args.use_yolo_crops:
         print("\n  Mode: YOLO on-the-fly crop extraction")
+        print(f"  YOLO TTA: {args.tta}")
         from ultralytics import YOLO as _YOLO
         _detector = _YOLO(str(args.detector_weights))
         _det_dev  = args.device
@@ -602,7 +611,9 @@ if __name__ == "__main__":
             conf      = args.det_conf,
             transform = get_transforms("train"),
             cache_dir = args.crop_cache_dir,
+            tta       = args.tta,
         )
+
         val_ds = YOLOCropDataset(
             args.crops_dir, "val",
             detector  = _detector,
@@ -610,7 +621,9 @@ if __name__ == "__main__":
             conf      = args.det_conf,
             transform = get_transforms("val"),
             cache_dir = args.crop_cache_dir,
+            tta       = args.tta,
         )
+
         test_ds = YOLOCropDataset(
             args.crops_dir, "test",
             detector  = _detector,
@@ -618,6 +631,7 @@ if __name__ == "__main__":
             conf      = args.det_conf,
             transform = get_transforms("test"),
             cache_dir = args.crop_cache_dir,
+            tta       = args.tta,
         )
     else:
         print("\n  Mode: loading pre-generated GT crops from disk")
@@ -677,10 +691,14 @@ if __name__ == "__main__":
                 "patience":      args.patience,
                 "use_yolo_crops":args.use_yolo_crops,
                 "det_conf":      args.det_conf,
+                "tta": args.tta,
                 "device":        args.device,
             })
-            mlflow.log_metrics(
-                {k: v for k, v in metrics.items() if isinstance(v, (int, float))})
+            mlflow.log_metrics({
+                k: float(v)
+                for k, v in metrics.items()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            })
             best_pt = run_dir / "weights" / "best.pt"
             if best_pt.exists():
                 mlflow.log_artifact(str(best_pt), "weights")
