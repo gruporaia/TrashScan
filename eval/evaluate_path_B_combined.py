@@ -32,11 +32,14 @@ import yaml
 from PIL import Image
 from tqdm import tqdm
 from ultralytics import YOLO
+from ensemble_boxes import weighted_boxes_fusion
+    
 
 COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "other"]
 COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "other"]
 NUM_CLASSES    = len(COARSE_CLASSES)
 IOU_THRESHOLDS = np.linspace(0.5, 0.95, 10)
+ENSEMBLE_AVAILABLE = True
 
 CLASSIFIER_REGISTRY = {
     "resnet50":         "resnet50.a1_in1k",
@@ -207,6 +210,141 @@ def compute_map(
     return ap_per_class, ar_per_class, gt_counts
 
 
+def _predict_array_yolo(
+    model,
+    img_pil: Image.Image,
+    device,
+    imgsz: int,
+    conf: float = 0.001,
+    iou: float = 0.6,
+):
+    """
+    Runs YOLO on a PIL image.
+    Returns normalized boxes [x1,y1,x2,y2] in [0,1], scores, classes.
+    """
+    result = model.predict(
+        source=img_pil,
+        conf=conf,
+        iou=iou,
+        imgsz=imgsz,
+        device=device,
+        verbose=False,
+    )[0]
+
+    if result.boxes is not None and len(result.boxes):
+        boxes = result.boxes.xyxyn.cpu().numpy().astype(np.float32)
+        scores = result.boxes.conf.cpu().numpy().astype(np.float32)
+        classes = result.boxes.cls.cpu().numpy().astype(int)
+    else:
+        boxes = np.zeros((0, 4), dtype=np.float32)
+        scores = np.zeros((0,), dtype=np.float32)
+        classes = np.zeros((0,), dtype=int)
+
+    return boxes, scores, classes
+
+
+def _undo_hflip_boxes_norm(boxes_norm: np.ndarray) -> np.ndarray:
+    """
+    Undo horizontal flip for normalized xyxy boxes in [0,1].
+    """
+    if len(boxes_norm) == 0:
+        return boxes_norm
+
+    out = boxes_norm.copy()
+    out[:, 0] = 1.0 - boxes_norm[:, 2]
+    out[:, 2] = 1.0 - boxes_norm[:, 0]
+    return out
+
+
+def predict_tta_wbf_yolo(
+    model,
+    img_pil: Image.Image,
+    device,
+    scales=(512, 640, 768),
+    use_hflip=True,
+    wbf_iou=0.55,
+    skip_box_thr=0.001,
+    det_iou=0.6,
+):
+    """
+    Multi-scale TTA + optional horizontal flip, fused with Weighted Boxes Fusion.
+    Mirrors the Path A TTA/WBF protocol.
+    Returns pixel-coordinate xyxy boxes, scores, classes.
+    """
+    if not ENSEMBLE_AVAILABLE:
+        raise RuntimeError(
+            "TTA+WBF requested but ensemble_boxes is not installed. "
+            "Install with: pip install ensemble-boxes"
+        )
+
+    W, H = img_pil.size
+
+    boxes_list = []
+    scores_list = []
+    labels_list = []
+
+    for scale in scales:
+        boxes, scores, classes = _predict_array_yolo(
+            model=model,
+            img_pil=img_pil,
+            device=device,
+            imgsz=scale,
+            conf=skip_box_thr,
+            iou=det_iou,
+        )
+
+        boxes_list.append(boxes.tolist())
+        scores_list.append(scores.tolist())
+        labels_list.append(classes.tolist())
+
+        if use_hflip:
+            img_flip = img_pil.transpose(Image.FLIP_LEFT_RIGHT)
+
+            boxes_f, scores_f, classes_f = _predict_array_yolo(
+                model=model,
+                img_pil=img_flip,
+                device=device,
+                imgsz=scale,
+                conf=skip_box_thr,
+                iou=det_iou,
+            )
+
+            boxes_f = _undo_hflip_boxes_norm(boxes_f)
+
+            boxes_list.append(boxes_f.tolist())
+            scores_list.append(scores_f.tolist())
+            labels_list.append(classes_f.tolist())
+
+    fused_boxes, fused_scores, fused_labels = weighted_boxes_fusion(
+        boxes_list,
+        scores_list,
+        labels_list,
+        weights=[1.0] * len(boxes_list),
+        iou_thr=wbf_iou,
+        skip_box_thr=skip_box_thr,
+    )
+
+    if len(fused_boxes) == 0:
+        return (
+            np.zeros((0, 4), dtype=np.float32),
+            np.zeros((0,), dtype=np.float32),
+            np.zeros((0,), dtype=int),
+        )
+
+    fused_boxes = np.array(fused_boxes, dtype=np.float32)
+    fused_scores = np.array(fused_scores, dtype=np.float32)
+    fused_labels = np.array(fused_labels, dtype=int)
+
+    # normalized xyxy -> pixel xyxy
+    boxes_px = fused_boxes.copy()
+    boxes_px[:, [0, 2]] *= W
+    boxes_px[:, [1, 3]] *= H
+
+    boxes_px[:, [0, 2]] = np.clip(boxes_px[:, [0, 2]], 0, W)
+    boxes_px[:, [1, 3]] = np.clip(boxes_px[:, [1, 3]], 0, H)
+
+    return boxes_px, fused_scores, fused_labels
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN EVALUATION LOOP
 # ─────────────────────────────────────────────────────────────────────────────
@@ -221,9 +359,20 @@ def evaluate_combined(
     imgsz:       int = 640,
     det_conf:    float = 0.001,
     det_iou:     float = 0.6,
+    use_tta_wbf: bool = False,
+    tta_scales=(512, 640, 768),
+    tta_flip:    bool = False,
+    tta_wbf_iou: float = 0.55,
+    tta_skip_box_thr: float = 0.001,
 ) -> dict:
     img_paths = sorted(test_img_dir.glob("*.jpg"))
     print(f"\n  Running combined inference on {len(img_paths)} test images...")
+    print(f"  TTA+WBF: {use_tta_wbf}")
+    if use_tta_wbf:
+        print(f"  TTA scales: {list(tta_scales)}")
+        print(f"  TTA flip: {tta_flip}")
+        print(f"  TTA WBF IoU: {tta_wbf_iou}")
+        print(f"  TTA skip box thr: {tta_skip_box_thr}")
 
     pred_boxes_all   = []
     pred_scores_all  = []
@@ -256,20 +405,49 @@ def evaluate_combined(
         gt_classes_all.append(np.array(gt_c, dtype=int))
 
         # ── stage 1: detect ───────────────────────────────────────────────
-        result = detector.predict(
-            str(img_path), conf=det_conf, iou=det_iou,
-            imgsz=imgsz, device=str(device.index
-                         if device.type=="cuda" else "cpu"),
-            verbose=False)[0]
+                
+        device_arg = str(device.index if device.type == "cuda" else "cpu")
 
-        if result.boxes is None or len(result.boxes) == 0:
+        if use_tta_wbf:
+            boxes_xyxy, scores, _det_classes = predict_tta_wbf_yolo(
+                model=detector,
+                img_pil=img_pil,
+                device=device_arg,
+                scales=tuple(tta_scales),
+                use_hflip=tta_flip,
+                wbf_iou=tta_wbf_iou,
+                skip_box_thr=tta_skip_box_thr,
+                det_iou=det_iou,
+            )
+
+            keep = scores >= det_conf
+            boxes_xyxy = boxes_xyxy[keep]
+            scores = scores[keep]
+
+        else:
+            result = detector.predict(
+                str(img_path),
+                conf=det_conf,
+                iou=det_iou,
+                imgsz=imgsz,
+                device=device_arg,
+                verbose=False,
+            )[0]
+
+            if result.boxes is None or len(result.boxes) == 0:
+                pred_boxes_all.append(np.zeros((0,4), dtype=np.float32))
+                pred_scores_all.append(np.zeros(0, dtype=np.float32))
+                pred_classes_all.append(np.zeros(0, dtype=int))
+                continue
+
+            boxes_xyxy = result.boxes.xyxy.cpu().numpy()
+            scores = result.boxes.conf.cpu().numpy()
+
+        if len(boxes_xyxy) == 0:
             pred_boxes_all.append(np.zeros((0,4), dtype=np.float32))
             pred_scores_all.append(np.zeros(0, dtype=np.float32))
             pred_classes_all.append(np.zeros(0, dtype=int))
             continue
-
-        boxes_xyxy = result.boxes.xyxy.cpu().numpy()   # (N,4) pixel coords
-        scores     = result.boxes.conf.cpu().numpy()   # (N,)
 
         # ── stage 2: classify each crop ───────────────────────────────────
         if not img_pil:
@@ -311,6 +489,12 @@ def evaluate_combined(
         "n_images":   len(img_paths),
         "det_conf":   det_conf,
         "det_iou":    det_iou,
+        "inference_mode": "tta_wbf" if use_tta_wbf else "standard",
+        "use_tta_wbf": bool(use_tta_wbf),
+        "tta_scales": list(tta_scales) if use_tta_wbf else None,
+        "tta_flip": bool(tta_flip) if use_tta_wbf else None,
+        "tta_wbf_iou": float(tta_wbf_iou) if use_tta_wbf else None,
+        "tta_skip_box_thr": float(tta_skip_box_thr) if use_tta_wbf else None,
     }
     for i, cls in enumerate(COARSE_CLASSES):
         result_dict[f"AP50_{cls}"] = round(float(ap50[i]), 5)
@@ -347,6 +531,16 @@ def parse_args():
     p.add_argument("--imgsz",            type=int, default=640)
     p.add_argument("--det_conf",         type=float, default=0.001)
     p.add_argument("--det_iou",          type=float, default=0.6)
+    p.add_argument("--use_tta_wbf", action="store_true",
+                   help="Enable multi-scale TTA + WBF during detector inference")
+    p.add_argument("--tta_scales", nargs="+", type=int, default=[512, 640, 768],
+                   help="Scales used for TTA, e.g. --tta_scales 512 640 768")
+    p.add_argument("--tta_flip", action="store_true",
+                   help="Also run horizontal flip in TTA")
+    p.add_argument("--tta_wbf_iou", type=float, default=0.55,
+                   help="WBF IoU threshold for TTA fusion")
+    p.add_argument("--tta_skip_box_thr", type=float, default=0.001,
+                   help="WBF skip_box_thr for TTA fusion")
     return p.parse_args()
 
 
@@ -400,6 +594,11 @@ def main():
             imgsz        = args.imgsz,
             det_conf     = args.det_conf,
             det_iou      = args.det_iou,
+            use_tta_wbf      = args.use_tta_wbf,
+            tta_scales       = args.tta_scales,
+            tta_flip         = args.tta_flip,
+            tta_wbf_iou      = args.tta_wbf_iou,
+            tta_skip_box_thr = args.tta_skip_box_thr,
         )
         all_results.append(result)
 

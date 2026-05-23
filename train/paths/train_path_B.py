@@ -59,6 +59,7 @@ from sklearn.metrics import (
 )
 import matplotlib.pyplot as plt
 from sklearn.metrics import ConfusionMatrixDisplay
+from ensemble_boxes import weighted_boxes_fusion
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONSTANTS
@@ -67,6 +68,8 @@ from sklearn.metrics import ConfusionMatrixDisplay
 COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "other"]
 NUM_CLASSES    = len(COARSE_CLASSES)
 CROP_SIZE      = 224
+ENSEMBLE_AVAILABLE = True
+
 
 CLASSIFIER_REGISTRY = {
     # B1: ResNet-50 — strong ImageNet CNN baseline
@@ -78,6 +81,134 @@ CLASSIFIER_REGISTRY = {
     # B4: ViT-L/16 ImageNet21k pretrained — larger model with large-scale pretraining
     "vit_l16_imagenet":  ("vit_large_patch16_224.augreg_in21k_ft_in1k", True),
 }
+
+def _predict_array_yolo(model, img_pil: Image.Image, device, imgsz: int,
+                        conf: float = 0.001, iou: float = 0.6):
+    """
+    Runs YOLO on a PIL image.
+    Returns normalized boxes [x1,y1,x2,y2] in [0,1], scores, classes.
+    """
+    result = model.predict(
+        source=img_pil,
+        conf=conf,
+        iou=iou,
+        imgsz=imgsz,
+        device=device,
+        verbose=False,
+    )[0]
+
+    if result.boxes is not None and len(result.boxes):
+        boxes = result.boxes.xyxyn.cpu().numpy().astype(np.float32)
+        scores = result.boxes.conf.cpu().numpy().astype(np.float32)
+        classes = result.boxes.cls.cpu().numpy().astype(int)
+    else:
+        boxes = np.zeros((0, 4), dtype=np.float32)
+        scores = np.zeros((0,), dtype=np.float32)
+        classes = np.zeros((0,), dtype=int)
+
+    return boxes, scores, classes
+
+
+def _undo_hflip_boxes_norm(boxes_norm: np.ndarray) -> np.ndarray:
+    """
+    Undo horizontal flip for normalized xyxy boxes in [0,1].
+    """
+    if len(boxes_norm) == 0:
+        return boxes_norm
+
+    out = boxes_norm.copy()
+    out[:, 0] = 1.0 - boxes_norm[:, 2]
+    out[:, 2] = 1.0 - boxes_norm[:, 0]
+    return out
+
+
+def predict_tta_wbf_yolo(
+    model,
+    img_pil: Image.Image,
+    device,
+    scales=(512, 640, 768),
+    use_hflip=True,
+    wbf_iou=0.55,
+    skip_box_thr=0.001,
+    det_iou=0.6,
+):
+    """
+    Multi-scale TTA + optional horizontal flip, fused with Weighted Boxes Fusion.
+    This mirrors the Path A TTA/WBF evaluation protocol.
+    Returns pixel-coordinate xyxy boxes, scores, classes.
+    """
+    if not ENSEMBLE_AVAILABLE:
+        raise RuntimeError(
+            "TTA+WBF requested but ensemble_boxes is not installed. "
+            "Install with: pip install ensemble-boxes"
+        )
+
+    W, H = img_pil.size
+
+    boxes_list = []
+    scores_list = []
+    labels_list = []
+
+    for scale in scales:
+        boxes, scores, classes = _predict_array_yolo(
+            model=model,
+            img_pil=img_pil,
+            device=device,
+            imgsz=scale,
+            conf=skip_box_thr,
+            iou=det_iou,
+        )
+        boxes_list.append(boxes.tolist())
+        scores_list.append(scores.tolist())
+        labels_list.append(classes.tolist())
+
+        if use_hflip:
+            img_flip = img_pil.transpose(Image.FLIP_LEFT_RIGHT)
+
+            boxes_f, scores_f, classes_f = _predict_array_yolo(
+                model=model,
+                img_pil=img_flip,
+                device=device,
+                imgsz=scale,
+                conf=skip_box_thr,
+                iou=det_iou,
+            )
+
+            boxes_f = _undo_hflip_boxes_norm(boxes_f)
+
+            boxes_list.append(boxes_f.tolist())
+            scores_list.append(scores_f.tolist())
+            labels_list.append(classes_f.tolist())
+
+    fused_boxes, fused_scores, fused_labels = weighted_boxes_fusion(
+        boxes_list,
+        scores_list,
+        labels_list,
+        weights=[1.0] * len(boxes_list),
+        iou_thr=wbf_iou,
+        skip_box_thr=skip_box_thr,
+    )
+
+    if len(fused_boxes) == 0:
+        return (
+            np.zeros((0, 4), dtype=np.float32),
+            np.zeros((0,), dtype=np.float32),
+            np.zeros((0,), dtype=int),
+        )
+
+    fused_boxes = np.array(fused_boxes, dtype=np.float32)
+    fused_scores = np.array(fused_scores, dtype=np.float32)
+    fused_labels = np.array(fused_labels, dtype=int)
+
+    # normalized xyxy -> pixel xyxy
+    boxes_px = fused_boxes.copy()
+    boxes_px[:, [0, 2]] *= W
+    boxes_px[:, [1, 3]] *= H
+
+    boxes_px[:, [0, 2]] = np.clip(boxes_px[:, [0, 2]], 0, W)
+    boxes_px[:, [1, 3]] = np.clip(boxes_px[:, [1, 3]], 0, H)
+
+    return boxes_px, fused_scores, fused_labels
 
 # ─────────────────────────────────────────────────────────────────────────────
 # YOLO-CROP DATASET
@@ -112,12 +243,20 @@ class YOLOCropDataset(Dataset):
         conf:      float = 0.25,
         transform=None,
         cache_dir: Path = None,
-        tta:      bool = False,
+        use_tta_wbf: bool = False,
+        tta_scales=(512, 640, 768),
+        tta_flip: bool = False,
+        tta_wbf_iou: float = 0.55,
+        tta_skip_box_thr: float = 0.001,
     ):
         self.transform = transform
         self.samples   = []          # [(crop_tensor_or_path, label)]
         self._use_cache = cache_dir is not None
-        self.tta = tta
+        self.use_tta_wbf = use_tta_wbf
+        self.tta_scales = tuple(tta_scales)
+        self.tta_flip = tta_flip
+        self.tta_wbf_iou = tta_wbf_iou
+        self.tta_skip_box_thr = tta_skip_box_thr
 
         img_dir = Path(data_root) / split / "path_B" / "images"
         lbl_dir = Path(data_root) / split / "path_B" / "labels"
@@ -173,21 +312,39 @@ class YOLOCropDataset(Dataset):
                 n_skipped += 1
                 continue
 
-            # run YOLO detector
-            result = detector.predict(
-                str(img_path),
-                conf=conf,
-                iou=0.6,
-                device=device,
-                augment=self.tta,
-                verbose=False,
-            )[0]
+            if self.use_tta_wbf:
+                det_boxes, det_scores, det_classes = predict_tta_wbf_yolo(
+                    model=detector,
+                    img_pil=img_pil,
+                    device=device,
+                    scales=self.tta_scales,
+                    use_hflip=self.tta_flip,
+                    wbf_iou=self.tta_wbf_iou,
+                    skip_box_thr=self.tta_skip_box_thr,
+                    det_iou=0.6,
+                )
 
-            if result.boxes is None or len(result.boxes) == 0:
+                keep = det_scores >= conf
+                det_boxes = det_boxes[keep]
+
+            else:
+                result = detector.predict(
+                    str(img_path),
+                    conf=conf,
+                    iou=0.6,
+                    device=device,
+                    verbose=False,
+                )[0]
+
+                if result.boxes is None or len(result.boxes) == 0:
+                    n_skipped += 1
+                    continue
+
+                det_boxes = result.boxes.xyxy.cpu().numpy()
+
+            if len(det_boxes) == 0:
                 n_skipped += 1
                 continue
-
-            det_boxes = result.boxes.xyxy.cpu().numpy()   # (N,4) pixel coords
 
             gt_arr = np.array(gt_boxes, dtype=np.float32)
             gt_cls = np.array(gt_classes, dtype=int)
@@ -571,8 +728,16 @@ def parse_args():
                    help="Extract crops from YOLO detector instead of GT crops")
     p.add_argument("--det_conf",         type=float, default=0.25,
                    help="YOLO detection confidence threshold for crop extraction")
-    p.add_argument("--tta",              action="store_true",
-               help="Use YOLO test-time augmentation during crop extraction")
+    p.add_argument("--use_tta_wbf", action="store_true",
+               help="Enable multi-scale TTA + WBF during YOLO crop extraction")
+    p.add_argument("--tta_scales", nargs="+", type=int, default=[512, 640, 768],
+                help="Scales used for TTA, e.g. --tta_scales 512 640 768")
+    p.add_argument("--tta_flip", action="store_true",
+                help="Also run horizontal flip in TTA")
+    p.add_argument("--tta_wbf_iou", type=float, default=0.55,
+                help="WBF IoU threshold for TTA fusion")
+    p.add_argument("--tta_skip_box_thr", type=float, default=0.001,
+                help="WBF skip_box_thr for TTA fusion")
     p.add_argument("--crop_cache_dir",   type=Path,  default=None,
                    help="Cache directory for YOLO-extracted crops")
     return p.parse_args()
@@ -599,7 +764,12 @@ if __name__ == "__main__":
     # ── build datasets ────────────────────────────────────────────────────
     if args.use_yolo_crops:
         print("\n  Mode: YOLO on-the-fly crop extraction")
-        print(f"  YOLO TTA: {args.tta}")
+        print(f"  YOLO TTA+WBF: {args.use_tta_wbf}")
+        if args.use_tta_wbf:
+            print(f"  TTA scales: {args.tta_scales}")
+            print(f"  TTA flip: {args.tta_flip}")
+            print(f"  TTA WBF IoU: {args.tta_wbf_iou}")
+            print(f"  TTA skip box thr: {args.tta_skip_box_thr}")
         from ultralytics import YOLO as _YOLO
         _detector = _YOLO(str(args.detector_weights))
         _det_dev  = args.device
@@ -611,7 +781,11 @@ if __name__ == "__main__":
             conf      = args.det_conf,
             transform = get_transforms("train"),
             cache_dir = args.crop_cache_dir,
-            tta       = args.tta,
+            use_tta_wbf     = args.use_tta_wbf,
+            tta_scales      = args.tta_scales,
+            tta_flip        = args.tta_flip,
+            tta_wbf_iou     = args.tta_wbf_iou,
+            tta_skip_box_thr= args.tta_skip_box_thr,
         )
 
         val_ds = YOLOCropDataset(
@@ -621,7 +795,11 @@ if __name__ == "__main__":
             conf      = args.det_conf,
             transform = get_transforms("val"),
             cache_dir = args.crop_cache_dir,
-            tta       = args.tta,
+            use_tta_wbf     = args.use_tta_wbf,
+            tta_scales      = args.tta_scales,
+            tta_flip        = args.tta_flip,
+            tta_wbf_iou     = args.tta_wbf_iou,
+            tta_skip_box_thr= args.tta_skip_box_thr,
         )
 
         test_ds = YOLOCropDataset(
@@ -631,7 +809,11 @@ if __name__ == "__main__":
             conf      = args.det_conf,
             transform = get_transforms("test"),
             cache_dir = args.crop_cache_dir,
-            tta       = args.tta,
+            use_tta_wbf     = args.use_tta_wbf,
+            tta_scales      = args.tta_scales,
+            tta_flip        = args.tta_flip,
+            tta_wbf_iou     = args.tta_wbf_iou,
+            tta_skip_box_thr= args.tta_skip_box_thr,
         )
     else:
         print("\n  Mode: loading pre-generated GT crops from disk")
@@ -691,7 +873,11 @@ if __name__ == "__main__":
                 "patience":      args.patience,
                 "use_yolo_crops":args.use_yolo_crops,
                 "det_conf":      args.det_conf,
-                "tta": args.tta,
+                "use_tta_wbf": args.use_tta_wbf,
+                "tta_scales": str(args.tta_scales),
+                "tta_flip": args.tta_flip,
+                "tta_wbf_iou": args.tta_wbf_iou,
+                "tta_skip_box_thr": args.tta_skip_box_thr,
                 "device":        args.device,
             })
             mlflow.log_metrics({
