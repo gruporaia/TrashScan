@@ -29,7 +29,11 @@ import mlflow
 import pandas as pd
 import torch
 import yaml
+from scipy.optimize import linear_sum_assignment
 from ultralytics import YOLO
+from ultralytics.models.yolo.detect import DetectionTrainer
+from ultralytics.utils.loss import v8DetectionLoss
+import torch.nn as nn
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MODEL REGISTRY
@@ -55,6 +59,7 @@ MODEL_REGISTRY = {
     "yolov11n":  "yolo11n.pt",
     "yolov11s":  "yolo11s.pt",
     "yolov11m":  "yolo11m.pt",
+    "yolov11m_o2o":  "yolo11m.pt",  # sem NMS
     "yolov11l":  "yolo11l.pt",
     "yolov11x":  "yolo11x.pt",
     # RT-DETR (transformer-based, no NMS)
@@ -62,7 +67,93 @@ MODEL_REGISTRY = {
     "rtdetr-x":  "rtdetr-x.pt",
 }
 
-COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "other"]
+COARSE_CLASSES = ["plastic", "paper", "metal", "glass",  "other"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# O2O COMPONENTS  (YOLOv11m NMS-free)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class HungarianMatcher(nn.Module):
+    """Assigns exactly 1 prediction per ground-truth (one-to-one)."""
+
+    def __init__(self, cost_cls=1.0, cost_bbox=5.0):
+        super().__init__()
+        self.cost_cls  = cost_cls
+        self.cost_bbox = cost_bbox
+
+    @torch.no_grad()
+    def forward(self, pred_logits, pred_boxes, gt_labels, gt_boxes):
+        M = gt_labels.shape[0]
+        if M == 0:
+            empty = torch.zeros(0, dtype=torch.long, device=pred_logits.device)
+            return empty, empty
+
+        probs     = pred_logits.sigmoid()
+        cost_cls  = -probs[:, gt_labels]
+        cost_bbox = torch.cdist(pred_boxes.float(), gt_boxes.float(), p=1)
+
+        C = self.cost_cls * cost_cls + self.cost_bbox * cost_bbox
+        row, col = linear_sum_assignment(C.cpu().numpy())
+        return (
+            torch.as_tensor(row, dtype=torch.long, device=pred_logits.device),
+            torch.as_tensor(col, dtype=torch.long, device=pred_logits.device),
+        )
+
+
+class DualAssignmentLoss(nn.Module):
+    """
+    Combines the original TAL loss (rich gradient signal, one-to-many)
+    with a Hungarian one-to-one loss (eliminates duplicates at inference).
+    """
+
+    def __init__(self, base_loss, matcher, weight_o2o=1.0):
+        super().__init__()
+        self.base_loss  = base_loss
+        self.matcher    = matcher
+        self.weight_o2o = weight_o2o
+        self.bce        = nn.BCEWithLogitsLoss(reduction="none")
+
+    def forward(self, preds, batch):
+        # ── TAL loss (one-to-many) ────────────────────────────────────────
+        loss_o2m, loss_items = self.base_loss(preds, batch)
+
+        # ── Hungarian loss (one-to-one) per image ────────────────────────
+        loss_o2o = torch.tensor(0.0, device=loss_o2m.device)
+        try:
+            pred_raw = preds[1] if isinstance(preds, (list, tuple)) else preds
+            bs = int(batch["batch_idx"].max().item()) + 1
+
+            for i in range(bs):
+                mask = batch["batch_idx"] == i
+                if mask.sum() == 0:
+                    continue
+
+                gt_cls = batch["cls"][mask].long().squeeze(-1)
+                gt_box = batch["bboxes"][mask]
+
+                p = pred_raw[1][i] if isinstance(pred_raw, (list, tuple)) else pred_raw[i]
+                pred_boxes  = p[:, :4]
+                pred_logits = p[:, 4:]
+
+                p_idx, g_idx = self.matcher(pred_logits, pred_boxes, gt_cls, gt_box)
+                if p_idx.numel() == 0:
+                    continue
+
+                target_cls = torch.zeros_like(pred_logits[p_idx])
+                target_cls[range(len(g_idx)), gt_cls[g_idx]] = 1.0
+                loss_o2o = loss_o2o + self.bce(pred_logits[p_idx], target_cls).mean()
+
+        except Exception as e:
+            print(f"[warn] o2o loss skipped: {e}")
+
+        return loss_o2m + self.weight_o2o * loss_o2o, loss_items
+
+
+class O2OTrainer(DetectionTrainer):
+    def init_criterion(self):
+        base    = v8DetectionLoss(self.model)
+        matcher = HungarianMatcher(cost_cls=1.0, cost_bbox=5.0)
+        return DualAssignmentLoss(base, matcher, weight_o2o=1.0)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
@@ -112,6 +203,7 @@ def train_single(
     device:       str,
     class_weights:list,
     patience:     int  = 30,
+    resume:       str  = None, 
 ) -> dict:
     model_str = MODEL_REGISTRY[model_key]
     print(f"\n{'─'*60}")
@@ -120,7 +212,15 @@ def train_single(
     print(f"  Epochs : {epochs}   Batch : {batch}   imgsz : {imgsz}")
     print(f"{'─'*60}")
 
-    model = YOLO(model_str)
+    if resume:
+        print(f"  Resuming from: {resume}")
+        model = YOLO(resume)
+    else:
+        model = YOLO(model_str)
+
+    extra_kwargs = {}
+    if model_key == "yolov11m_o2o":
+        extra_kwargs["trainer"] = O2OTrainer
 
     results = model.train(
         data            = str(data_yaml),
@@ -167,13 +267,15 @@ def train_single(
 
         # ── other ─────────────────────────────────────────────────────────
         rect            = False,
-        cache           = True,
+        cache           = "disk",
         workers         = 8,
         patience        = patience,
-        save_period     = -1,
+        save_period     = 10,
         val             = True,
         plots           = True,
         verbose         = True,
+        resume = bool(resume),
+        **extra_kwargs,
     )
 
     # ── extract metrics ───────────────────────────────────────────────────
@@ -261,6 +363,8 @@ def parse_args():
                    help="Early stopping: epochs without improvement before stopping")
     p.add_argument("--mlflow_uri", type=str,  default="./mlruns")
     p.add_argument("--summarize",  action="store_true")
+    p.add_argument("--resume", type=str, default=None,
+               help="Caminho para last.pt para retomar treino")
     return p.parse_args()
 
 
@@ -305,6 +409,7 @@ if __name__ == "__main__":
             device        = args.device,
             class_weights = class_weights,
             patience      = args.patience,
+            resume = args.resume
         )
 
         metrics_path = args.output / model_key / "metrics.json"
