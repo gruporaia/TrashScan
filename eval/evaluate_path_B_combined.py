@@ -36,7 +36,6 @@ from ensemble_boxes import weighted_boxes_fusion
     
 
 COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "other"]
-COARSE_CLASSES = ["plastic", "paper", "metal", "glass", "other"]
 NUM_CLASSES    = len(COARSE_CLASSES)
 IOU_THRESHOLDS = np.linspace(0.5, 0.95, 10)
 ENSEMBLE_AVAILABLE = True

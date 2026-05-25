@@ -15,8 +15,8 @@ Two crop-sourcing modes:
 Usage — YOLO-crop mode (recommended, matches evaluation protocol):
   conda activate litter_AB
   python train_path_B.py \
-      --detector_weights ~/runs/path_A_4cls/yolov8m/weights/best.pt \
-      --crops_dir        ~/processed_4cls \
+      --detector_weights ~/runs/path_A_5cls/yolov11m_o2o/weights/best.pt \
+      --crops_dir        ~/processed_5cls \
       --output           ~/runs/path_B \
       --classifiers      resnet50 vit_b16_scratch vit_b16_imagenet \
       --epochs           50 \
@@ -28,8 +28,8 @@ Usage — YOLO-crop mode (recommended, matches evaluation protocol):
 
 Usage — GT-crop mode (fast baseline):
   python train_path_B.py \
-      --detector_weights ~/runs/path_A_4cls/yolov8m/weights/best.pt \
-      --crops_dir        ~/processed_4cls \
+      --detector_weights ~/runs/path_A_5cls/yolov11m_o2o/weights/best.pt \
+      --crops_dir        ~/processed_5cls \
       --output           ~/runs/path_B \
       --classifiers      resnet50 vit_b16_scratch vit_b16_imagenet \
       --epochs           50 --batch 32 --device 0
@@ -225,7 +225,7 @@ class YOLOCropDataset(Dataset):
     On subsequent epochs the cached crops are loaded directly (fast path).
 
     Args:
-        data_root:  processed_4cls root (contains train/val/test/path_B)
+        data_root:  processed dataset root (contains train/val/test/path_B)
         split:      "train" | "val" | "test"
         detector:   Ultralytics YOLO model (frozen, for inference only)
         device:     inference device string, e.g. "0" or "cpu"
@@ -710,7 +710,7 @@ def parse_args():
     p.add_argument("--detector_weights", type=Path, required=True,
                    help="best.pt from best Path A model (frozen detector)")
     p.add_argument("--crops_dir",        type=Path, required=True,
-                   help="processed_4cls root dir")
+                   help="processed dataset root dir")
     p.add_argument("--output",           type=Path,
                    default=Path("runs/path_B"))
     p.add_argument("--classifiers",      nargs="+",
