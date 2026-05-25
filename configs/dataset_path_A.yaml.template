@@ -1,15 +1,16 @@
 # TrashScan — YOLO dataset configuration template
 # Copy to processed_4cls/dataset_path_A.yaml and update 'path' to your absolute output dir.
 
-path: /home/ubuntu/thrashscan/processed_4cls   # <-- update this
+path: /home/ubuntu/thrashscan/processed_5cls   # <-- update this
 
 train: train/path_A/images
 val:   val/path_A/images
 test:  test/path_A/images
 
-nc: 4
+nc: 5
 names:
   0: plastic
   1: paper
   2: metal
-  3: other
+  3: glass
+  4: other
