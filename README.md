@@ -1,84 +1,35 @@
 # TrashScan
 
-A gestão eficiente de resíduos sólidos é um dos principais desafios ambientais nas cidades. A variabilidade visual dos materiais descartados, objetos amassados, sujos ou parcialmente ocluídos, dificulta a automação da triagem com métodos tradicionais de visão computacional.
+Efficient solid waste management is a major environmental challenge in urban areas. The visual variability of discarded materials, such as crushed, dirty, or partially occluded objects, makes automated sorting using traditional computer vision methods difficult.
 
-O TrashScan propõe o desenvolvimento de um sistema de classificação e detecção de resíduos utilizando técnicas modernas de Deep Learning. O projeto tem como foco a comparação e possível integração de arquiteturas baseadas em YOLO e Vision Transformers, avaliando seu desempenho em cenários reais de triagem.
+TrashScan is a deep learning-based waste detection and classification project. It serves as a benchmarking pipeline to evaluate and compare a single-stage detector and classifier against a two-stage approach.
 
----
+## Problem Statement
 
-## Qual problema ele resolve?
+Automating waste sorting faces significant challenges due to the high visual variability of discarded materials. Deformed packaging, contaminated waste, overlapping objects, and varying lighting conditions make detection and classification complex tasks.
 
-A automação da triagem de resíduos enfrenta desafios significativos devido à alta variabilidade visual dos materiais descartados. Embalagens deformadas, resíduos contaminados, sobreposição de objetos e diferentes condições de iluminação tornam a detecção e classificação tarefas complexas.
+TrashScan investigates deep learning solutions to:
 
-O TrashScan busca investigar soluções baseadas em Deep Learning para:
+* Automatically detect waste in images.
+* Classify waste into recyclable and non-recyclable categories.
+* Compare single-stage and two-stage architectures.
+* Evaluate performance regarding accuracy and latency.
 
-- Detectar automaticamente resíduos em imagens
-- Classificar resíduos recicláveis e não recicláveis  
-- Comparar arquiteturas YOLO e/ou Vision Transformers  
-- Avaliar desempenho em termos de precisão e latência  
+## Pipeline Architecture and Methods
 
----
+This project implements a modular benchmarking pipeline to evaluate different object detection and classification strategies.
 
-## ⚙️ Funcionamento
+### Path A: Single-Stage Detector and Classifier (YOLO)
 
-O projeto propõe o desenvolvimento de um pipeline modular que integre:
+This method utilizes YOLO (You Only Look Once) as a single-stage architecture. The network performs both bounding box regression (localization) and class probability prediction (classification) simultaneously in one forward pass. This approach is highly optimized for fast inference and real-time processing.
 
-- Detecção de objetos  
-- Classificação de resíduos recicláveis e não recicláveis  
-- Comparação entre arquiteturas YOLO e/ou ViT  
-- Otimização para inferência em tempo real  
+### Path B: Two-Stage Detector and Classifier (YOLO + ViT)
 
----
+This method isolates the tasks into two separate models:
 
-## 🔄 Pipeline de Funcionamento do TrashScan
+1. **Detection (Stage 1):** A YOLO model is used strictly to identify the spatial location of objects and extract bounding boxes.
+2. **Classification (Stage 2):** The cropped bounding boxes are fed into a Vision Transformer (ViT). The ViT handles the complex visual features to perform the final classification. This path evaluates if the robust feature extraction capabilities of ViTs can improve classification accuracy over the single-stage approach.
 
-(Esta seção poderá incluir futuramente um diagrama/texto ilustrativo do pipeline.)
+### Path C: Extended Pipeline
 
----
-
-## 🛠️ Como executar
-
-(Instruções para configuração de ambiente, organização do dataset e execução do pipeline de treinamento e inferência.)
-
----
-
-## Modelagem
-
-(Esta seção será preenchida com as descrições das arquiteturas baseadas em YOLO e Vision Transformers, bem como possíveis abordagens híbridas avaliadas durante o desenvolvimento.)
-
----
-
-## 📊 Resultados
-
-(Análise detalhada das métricas de desempenho e comparação entre abordagens utilizadas em termos de precisão e latência.)
-
----
-
-## Próximos passos
-
-(Planos para validação em ambiente real de triagem, expansão do dataset, integração com sistemas industriais e avaliação de arquiteturas híbridas.)
-
----
-
-## 📑 Referências
-
-(Referências bibliográficas utilizadas durante a confecção do trabalho.)
-
----
-
-## 💻 Quem somos
-
-Este projeto é desenvolvido pelos membros do **RAIA Rede de Avanço de Inteligência Artificial**, iniciativa estudantil do Instituto de Ciências Matemáticas e de Computação ICMC da USP São Carlos. Nosso objetivo é criar soluções inovadoras com inteligência artificial para gerar impacto positivo na sociedade.
-
----
-
-## 🔎 Saiba mais
-
-Site: https://grupo-raia.org/  
-Instagram: https://instagram.com/grupo.raia  
-
----
-
-## 👨‍💻 Desenvolvedores
-
-- Gabriel Fagundes Mesquita Sousa | [LinkedIn](https://www.linkedin.com/in/gafagundes/) | [GitHub](https://www.github.com/gabrafo/)
+Additionally, the repository includes Path C, an alternative experimental approach. While the current primary benchmark focuses on comparing Path A and Path B, Path C is maintained within the codebase for broader research and extended evaluations.
